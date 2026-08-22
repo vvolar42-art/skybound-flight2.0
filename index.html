@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="es">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#00ffcc">
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js');
+    }
+  </script>
+<head>
+    <!-- Soporte PWA Android/Universal -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#00ffcc">
+
+  <!-- Soporte específico para iOS (iPhone/iPad) -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Simulador3D">
+  <link rel="apple-touch-icon" href="icon.png">
+
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js');
+      });
+    }
+  </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Simulador de Vuelo 3D</title>
+  <style>
+    * { box-sizing: border-box; touch-action: none; user-select: none; -webkit-user-select: none; }
+    body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; font-family: sans-serif; }
+    #canvas-container { width: 100%; height: 100%; position: absolute; top: 0; left: 0; z-index: 1; }
+    #ui { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; padding: 10px; }
+    .interactive { pointer-events: auto; }
+    #top-bar { display: flex; justify-content: space-between; align-items: center; width: 100%; }
+    #hud { color: #00ffcc; font-family: monospace; font-size: 12px; background: rgba(0,0,0,0.6); padding: 6px 12px; border-radius: 6px; border: 1px solid #00ffcc; }
+    .btn { background: rgba(255,255,255,0.2); border: 2px solid #fff; color: #fff; padding: 8px 16px; border-radius: 20px; font-weight: bold; font-size: 12px; text-transform: uppercase; backdrop-filter: blur(4px); }
+    .btn:active { background: rgba(255,255,255,0.5); }
+    #controls-container { display: flex; width: 100%; height: calc(100% - 60px); justify-content: space-between; align-items: flex-end; padding-bottom: 10px; }
+    #left-zone, #right-zone { width: 45%; height: 100%; display: flex; align-items: flex-end; }
+    #left-zone { justify-content: flex-start; }
+    #right-zone { justify-content: flex-end; }
+    #joystick-base { width: 130px; height: 130px; background: rgba(255,255,255,0.15); border: 2px solid rgba(255,255,255,0.4); border-radius: 50%; position: relative; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
+    #joystick-stick { width: 50px; height: 50px; background: #00ffcc; border-radius: 50%; position: absolute; box-shadow: 0 0 10px #00ffcc; }
+    #throttle-container { width: 70px; height: 220px; background: rgba(0,0,0,0.6); border: 2px solid rgba(255,255,255,0.3); border-radius: 12px; position: relative; display: flex; flex-direction: column; justify-content: space-between; align-items: center; padding: 10px 0; backdrop-filter: blur(4px); }
+    #throttle-track { position: absolute; top: 20px; bottom: 20px; width: 6px; background: rgba(255,255,255,0.2); border-radius: 3px; }
+    #throttle-handle { width: 50px; height: 30px; background: #ff3366; border-radius: 6px; position: absolute; bottom: 20px; left: 10px; box-shadow: 0 0 8px #ff3366; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 10px; }
+    .gear-label { font-size: 9px; color: #fff; z-index: 2; font-family: monospace; }
+  </style>
+  <script src="three.min.js"></script>
+</head>
+<body>
+
+  <div id="canvas-container"></div>
+
+  <div id="ui">
+    <div id="top-bar">
+      <div id="hud">ALT: <span id="hud-alt">0</span>m | VEL: <span id="hud-spd">0</span>km/h | GEAR: <span id="hud-gear">N</span></div>
+      <button id="swap-btn" class="btn interactive">Invertir Mandos</button>
+    </div>
+
+    <div id="controls-container">
+      <div id="left-zone" class="interactive">
+        <div id="joystick-base">
+          <div id="joystick-stick"></div>
+        </div>
+      </div>
+      <div id="right-zone" class="interactive">
+        <div id="throttle-container">
+          <div id="throttle-track"></div>
+          <span class="gear-label">7</span>
+          <span class="gear-label">6</span>
+          <span class="gear-label">5</span>
+          <span class="gear-label">4</span>
+          <span class="gear-label">3</span>
+          <span class="gear-label">2</span>
+          <span class="gear-label">1</span>
+          <span class="gear-label">N</span>
+          <span class="gear-label">R</span>
+          <div id="throttle-handle">N</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script>
+    const container = document.getElementById('canvas-container');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x6eb7ff);
+    scene.fog = new THREE.FogExp2(0x6eb7ff, 0.0003);
+
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 10000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    container.appendChild(renderer.domElement);
+
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    scene.add(ambientLight);
+
+    const dirLight = new THREE.DirectionalLight(0xfffaed, 0.9);
+    dirLight.position.set(1000, 3000, 1000);
+    dirLight.castShadow = true;
+    scene.add(dirLight);
+
+    // Avión
+    const planeGroup = new THREE.Group();
+    const bodyGeo = new THREE.ConeGeometry(1.2, 8, 8);
+    bodyGeo.rotateX(Math.PI / 2);
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0xd9381e });
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    planeGroup.add(body);
+
+    const wingGeo = new THREE.BoxGeometry(10, 0.1, 2);
+    const wingMat = new THREE.MeshStandardMaterial({ color: 0xeeeeee });
+    const wings = new THREE.Mesh(wingGeo, wingMat);
+    wings.position.set(0, 0, 0.5);
+    planeGroup.add(wings);
+
+    const tailGeo = new THREE.BoxGeometry(0.1, 1.8, 1.2);
+    const tail = new THREE.Mesh(tailGeo, wingMat);
+    tail.position.set(0, 1, -3.2);
+    planeGroup.add(tail);
+
+    const propGeo = new THREE.BoxGeometry(2.4, 0.2, 0.05);
+    const propMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+    const propeller = new THREE.Mesh(propGeo, propMat);
+    propeller.position.set(0, 0, 4.1);
+    planeGroup.add(propeller);
+    scene.add(planeGroup);
+
+    // Terreno
+    const CHUNK_SIZE = 1200;
+    const CHUNK_RES = 32;
+    const chunks = new Map();
+    
+    function pseudoNoise(x, z) { 
+  const baseLand = -100; 
+  
+  // Frecuencias más bajas (0.0005 en lugar de 0.0008) hacen que las formas sean más grandes y suaves
+  const nLow = Math.sin(x * 0.0008) * Math.cos(z * 0.0008);
+  // Reducimos drásticamente el impacto de las frecuencias medias para evitar pequeñas colinas constantes
+  const nMid = Math.sin(x * 0.002) * Math.sin(z * 0.002);
+
+  // Usamos Math.max(0, ...) para "cortar" los valles y convertirlos en terreno plano al nivel del mar (baseLand)
+  // Esto crea grandes esplanadas entre montañas
+  let height = baseLand + (Math.max(0, nLow) * 800) + (Math.max(0, nMid) * 1200) + (Math.max(0, mountainSpread) * 8000);
+
+  // Picos raros: Usamos una potencia alta (6) para que solo aparezcan montañas muy altas
+  // pero que no afecten al resto del terreno llano.
+  const rarePeakFactor = Math.pow(Math.max(0, nLow + 0.2), 4); 
+  height += rarePeakFactor * 8000;
+
+  return height;
+}
+    
+function createChunk(cx, cz) {
+  const group = new THREE.Group();
+  const geo = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE, CHUNK_RES, CHUNK_RES);
+  geo.rotateX(-Math.PI / 2);
+  const pos = geo.attributes.position;
+
+  for (let i = 0; i < pos.count; i++) {
+    const vx = pos.getX(i) + cx * CHUNK_SIZE;
+    const vz = pos.getZ(i) + cz * CHUNK_SIZE;
+    let h = pseudoNoise(vx, vz);
+    if (h < -20) h = -20; // Límite inferior para cuencas de agua profundas
+    pos.setY(i, h);
+  }
+  geo.computeVertexNormals();
+
+  const mat = new THREE.MeshStandardMaterial({ color: 0x2e6f40, flatShading: true });
+  const terrain = new THREE.Mesh(geo, mat);
+  group.add(terrain);
+
+  // Nivel del agua
+  const waterGeo = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE);
+  waterGeo.rotateX(-Math.PI / 2);
+  const waterMat = new THREE.MeshStandardMaterial({ color: 0x0066cc, transparent: true, opacity: 0.75, roughness: 0.1 });
+  const water = new THREE.Mesh(waterGeo, waterMat);
+  water.position.y = -5;
+  group.add(water);
+
+  const seed = Math.abs(Math.sin(cx * 12.9898 + cz * 78.233));
+
+  // Pistas de aterrizaje en zonas llanas
+  if (Math.floor(seed * 100) % 5 === 0) {
+    const rwayGeo = new THREE.PlaneGeometry(60, 500);
+    rwayGeo.rotateX(-Math.PI / 2);
+    const rwayMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+    const runway = new THREE.Mesh(rwayGeo, rwayMat);
+    runway.position.set(0, 1, 0);
+    group.add(runway);
+
+    const towerGeo = new THREE.CylinderGeometry(4, 6, 50, 8);
+    const towerMat = new THREE.MeshStandardMaterial({ color: 0xcccccc });
+    const tower = new THREE.Mesh(towerGeo, towerMat);
+    tower.position.set(45, 25, 0);
+    group.add(tower);
+  } 
+  
+  // Vegetación, rocas y picos nevados adaptados a las nuevas alturas
+  for (let i = 0; i < 18; i++) {
+    const tx = (Math.random() - 0.5) * CHUNK_SIZE;
+    const tz = (Math.random() - 0.5) * CHUNK_SIZE;
+    const ty = pseudoNoise(tx + cx * CHUNK_SIZE, tz + cz * CHUNK_SIZE);
+
+    if (ty > 2 && ty < 800) { 
+      // Bosques en cotas bajas e intermedias
+      if (Math.random() > 0.3) {
+        const treeGeo = new THREE.ConeGeometry(5, 18, 5);
+        const treeMat = new THREE.MeshStandardMaterial({ color: 0x184725 });
+        const tree = new THREE.Mesh(treeGeo, treeMat);
+        tree.position.set(tx, ty + 9, tz);
+        group.add(tree);
+      } else {
+        const rockGeo = new THREE.DodecahedronGeometry(6 + Math.random() * 8);
+        const rockMat = new THREE.MeshStandardMaterial({ color: 0x777777, flatShading: true });
+        const rock = new THREE.Mesh(rockGeo, rockMat);
+        rock.position.set(tx, ty + 4, tz);
+        group.add(rock);
+      }
+    } else if (ty >= 1200) { 
+      // Nieve perpetua en picos altos (a partir de 1.200 m)
+      const snowGeo = new THREE.ConeGeometry(25, 20, 5);
+      const snowMat = new THREE.MeshStandardMaterial({ color: 0xffffff, flatShading: true });
+      const snow = new THREE.Mesh(snowGeo, snowMat);
+      snow.position.set(tx, ty + 10, tz);
+      group.add(snow);
+    }
+  }
+
+  // Nubes flotando a mayor altitud (entre 2.500 m y 4.000 m)
+  if (seed > 0.3) {
+    const cloudGeo = new THREE.DodecahedronGeometry(60 + Math.random() * 60);
+    const cloudMat = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, flatShading: true });
+    const cloud = new THREE.Mesh(cloudGeo, cloudMat);
+    cloud.position.set((Math.random() - 0.5) * CHUNK_SIZE, 2500 + Math.random() * 1500, (Math.random() - 0.5) * CHUNK_SIZE);
+    group.add(cloud);
+  }
+
+  group.position.set(cx * CHUNK_SIZE, 0, cz * CHUNK_SIZE);
+  scene.add(group);
+  return group;
+}
+
+
+    
+    function updateTerrain() {
+      const pX = Math.floor(planeGroup.position.x / CHUNK_SIZE);
+      const pZ = Math.floor(planeGroup.position.z / CHUNK_SIZE);
+      for (let x = -2; x <= 2; x++) {
+        for (let z = -2; z <= 2; z++) {
+          const key = `${pX + x},${pZ + z}`;
+          if (!chunks.has(key)) chunks.set(key, createChunk(pX + x, pZ + z));
+        }
+      }
+    }
+
+    // Variables globales de control
+    let joyTouchId = null;
+    let throttleTouchId = null;
+    let joystickInput = { x: 0, y: 0 };
+    let controlsSwapped = false;
+
+    const physics = { speed: 0, gearRatio: 0, currentGear: 'N', gears: { 'R': -15, 'N': 0, '1': 20, '2': 40, '3': 60, '4': 90, '5': 120, '6': 160, '7': 210 } };
+    planeGroup.position.set(0, 8500, 0);
+
+    const joyBase = document.getElementById('joystick-base');
+    const joyStick = document.getElementById('joystick-stick');
+    const throttleContainer = document.getElementById('throttle-container');
+    const throttleHandle = document.getElementById('throttle-handle');
+    const leftZone = document.getElementById('left-zone');
+    const rightZone = document.getElementById('right-zone');
+
+    document.getElementById('swap-btn').addEventListener('click', () => {
+      controlsSwapped = !controlsSwapped;
+      if (controlsSwapped) { leftZone.appendChild(throttleContainer); rightZone.appendChild(joyBase); }
+      else { leftZone.appendChild(joyBase); rightZone.appendChild(throttleContainer); }
+    });
+
+    joyBase.addEventListener('touchstart', e => { joyTouchId = e.changedTouches[0].identifier; updateJoystick(e.changedTouches[0]); });
+    
+    window.addEventListener('touchmove', e => {
+      for (let t of e.changedTouches) {
+        if (t.identifier === joyTouchId) updateJoystick(t);
+        if (t.identifier === throttleTouchId) updateThrottle(t);
+      }
+    });
+
+    const resetJoy = () => { joystickInput = { x: 0, y: 0 }; joyStick.style.transform = `translate(0px, 0px)`; };
+    
+    window.addEventListener('touchend', e => {
+      for (let t of e.changedTouches) {
+        if (t.identifier === joyTouchId) { joyTouchId = null; resetJoy(); }
+        if (t.identifier === throttleTouchId) throttleTouchId = null;
+      }
+    });
+
+    function updateJoystick(touch) {
+      const rect = joyBase.getBoundingClientRect();
+      const centerX = rect.left + rect.width / 2;
+      const centerY = rect.top + rect.height / 2;
+      let dx = touch.clientX - centerX;
+      let dy = touch.clientY - centerY;
+      const dist = Math.min(Math.hypot(dx, dy), 50);
+      const angle = Math.atan2(dy, dx);
+      dx = Math.cos(angle) * dist;
+      dy = Math.sin(angle) * dist;
+      joyStick.style.transform = `translate(${dx}px, ${dy}px)`;
+      
+      joystickInput.x = -dx / 50; 
+      joystickInput.y = dy / 50; 
+    }
+
+    const gearKeys = ['R', 'N', '1', '2', '3', '4', '5', '6', '7'];
+    throttleContainer.addEventListener('touchstart', e => { throttleTouchId = e.changedTouches[0].identifier; updateThrottle(e.changedTouches[0]); });
+
+    function updateThrottle(touch) {
+      const rect = throttleContainer.getBoundingClientRect();
+      let relY = (touch.clientY - rect.top) / rect.height;
+      relY = Math.max(0, Math.min(1, relY));
+      const idx = 8 - Math.floor(relY * 9);
+      const gear = gearKeys[Math.min(8, Math.max(0, idx))];
+      physics.currentGear = gear;
+      throttleHandle.innerText = gear;
+      throttleHandle.style.bottom = `${(relY * -1 + 1) * 80 + 5}%`;
+      physics.gearRatio = physics.gears[gear];
+      document.getElementById('hud-gear').innerText = gear;
+    }
+
+    function getGroundHeight(x, z) {
+      let h = pseudoNoise(x, z);
+      return Math.max(-5, h);
+    }
+
+    const clock = new THREE.Clock();
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const delta = Math.min(clock.getDelta(), 0.05);
+      const forwardDir = new THREE.Vector3(0, 0, 1).applyQuaternion(planeGroup.quaternion);
+      const pitchSin = forwardDir.y;
+
+      if (physics.currentGear === 'N') {
+        const dragFactor = 4.0;
+        physics.speed -= physics.speed * dragFactor * 0.05 * delta;
+        physics.speed -= pitchSin * 45 * delta;
+      } else {
+        const targetSpeed = physics.gearRatio;
+        physics.speed += (targetSpeed - physics.speed) * Math.min(delta * 1.5, 1.0);
+      }
+
+      const absSpeed = Math.abs(physics.speed);
+      const controlEffect = Math.min(absSpeed / 35, 0.85);
+
+      planeGroup.rotateX(-joystickInput.y * controlEffect * delta * 1.2);
+      planeGroup.rotateZ(-joystickInput.x * controlEffect * delta * 4.5);
+      
+      const yawDirection = physics.speed >= 0 ? 1 : -1;
+      planeGroup.rotateY(-joystickInput.x * 0.6 * controlEffect * delta * yawDirection); 
+
+      planeGroup.translateZ(physics.speed * delta);
+
+      const currentPos = planeGroup.position;
+      const terrainHeight = getGroundHeight(currentPos.x, currentPos.z);
+      const minAltitude = terrainHeight + 1.2;
+
+      const minFlightSpeed = 20;
+      if (absSpeed < minFlightSpeed && currentPos.y > minAltitude) {
+        const fallRate = (1 - absSpeed / minFlightSpeed) * 9.8;
+        planeGroup.position.y -= fallRate * delta;
+      }
+
+      if (currentPos.y <= minAltitude) {
+        currentPos.y = minAltitude;
+        planeGroup.rotation.z *= 0.8;
+        if (planeGroup.rotation.x < 0) planeGroup.rotation.x *= 0.8;
+      }
+
+      const propSpeedMultiplier = physics.currentGear === 'N' ? 0.2 : 0.5;
+      propeller.rotation.z += (physics.speed !== 0 ? physics.speed : 1) * delta * propSpeedMultiplier;
+
+      const camOffset = new THREE.Vector3(0, 5, -18).applyQuaternion(planeGroup.quaternion);
+      camera.position.lerp(planeGroup.position.clone().add(camOffset), 0.1);
+      camera.lookAt(planeGroup.position.clone().add(new THREE.Vector3(0, 1, 5).applyQuaternion(planeGroup.quaternion)));
+
+      updateTerrain();
+
+      document.getElementById('hud-alt').innerText = Math.round(planeGroup.position.y);
+      document.getElementById('hud-spd').innerText = Math.round(physics.speed * 2);
+
+      renderer.render(scene, camera);
+    }
+
+    window.addEventListener('resize', () => { 
+      camera.aspect = window.innerWidth / window.innerHeight; 
+      camera.updateProjectionMatrix(); 
+      renderer.setSize(window.innerWidth, window.innerHeight); 
+    });
+
+    animate();
+  </script>
+</body>
+</html>
